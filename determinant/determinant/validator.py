@@ -63,6 +63,7 @@ def compare_runs(
     run_dir_a: str | Path,
     run_dir_b: str | Path,
     *,
+    strict: bool = True,
     normalize_run_id: bool = True,
 ) -> ComparisonResult:
     """Compare two run directories for deterministic ledger equivalence."""
@@ -94,9 +95,12 @@ def compare_runs(
     if issues:
         return ComparisonResult(ok=False, issues=issues)
 
-    return deterministic_equivalence(
-        records_a, records_b, normalize_run_id=normalize_run_id
-    )
+    _compare_record_sequence(records_a, records_b, issues)
+
+    projected_a = _project_ledger_records(records_a, normalize_run_id=normalize_run_id)
+    projected_b = _project_ledger_records(records_b, normalize_run_id=normalize_run_id)
+    _compare_projected_records(projected_a, projected_b, issues, strict=strict)
+    return ComparisonResult(ok=not issues, issues=issues)
 
 
 def deterministic_equivalence(
@@ -104,12 +108,13 @@ def deterministic_equivalence(
     records_b: Sequence[Mapping[str, Any]],
     *,
     normalize_run_id: bool = True,
+    strict: bool = True,
 ) -> ComparisonResult:
     """Compare projected ledger records for deterministic equivalence."""
     issues: list[ComparisonIssue] = []
     projected_a = _project_ledger_records(records_a, normalize_run_id=normalize_run_id)
     projected_b = _project_ledger_records(records_b, normalize_run_id=normalize_run_id)
-    _compare_projected_records(projected_a, projected_b, issues)
+    _compare_projected_records(projected_a, projected_b, issues, strict=strict)
     return ComparisonResult(ok=not issues, issues=issues)
 
 
@@ -324,6 +329,8 @@ def _compare_projected_records(
     records_a: Sequence[Mapping[str, Any]],
     records_b: Sequence[Mapping[str, Any]],
     issues: list[ComparisonIssue],
+    *,
+    strict: bool,
 ) -> None:
     if len(records_a) != len(records_b):
         _add_comparison_issue(
@@ -334,13 +341,114 @@ def _compare_projected_records(
         )
 
     for index, (record_a, record_b) in enumerate(zip(records_a, records_b)):
-        if record_a != record_b:
+        if record_a == record_b:
+            continue
+        diffs = _diff_fields(record_a, record_b)
+        if not diffs:
+            continue
+        lenient_fields = {"runtime.version", "inputs.env.sha256"}
+        lenient_diffs = [diff for diff in diffs if diff[0] in lenient_fields]
+        hard_diffs = [diff for diff in diffs if diff[0] not in lenient_fields]
+        context = _format_record_context(record_a or record_b)
+        if hard_diffs:
             _add_comparison_issue(
                 issues,
                 "ERROR",
                 "RECORD_MISMATCH",
-                f"Record mismatch at index {index}: {record_a!r} != {record_b!r}",
+                _format_record_mismatch_message(index, context, hard_diffs),
             )
+        if lenient_diffs and not strict:
+            _add_comparison_issue(
+                issues,
+                "WARN",
+                "RECORD_MISMATCH",
+                _format_record_mismatch_message(index, context, lenient_diffs),
+            )
+        elif lenient_diffs and strict:
+            _add_comparison_issue(
+                issues,
+                "ERROR",
+                "RECORD_MISMATCH",
+                _format_record_mismatch_message(index, context, lenient_diffs),
+            )
+
+
+def _compare_record_sequence(
+    records_a: Sequence[Mapping[str, Any]],
+    records_b: Sequence[Mapping[str, Any]],
+    issues: list[ComparisonIssue],
+) -> None:
+    if len(records_a) != len(records_b):
+        _add_comparison_issue(
+            issues,
+            "ERROR",
+            "RECORD_COUNT_MISMATCH",
+            f"Record count mismatch: {len(records_a)} != {len(records_b)}",
+        )
+
+    for index, (record_a, record_b) in enumerate(zip(records_a, records_b)):
+        type_a = record_a.get("type")
+        type_b = record_b.get("type")
+        if type_a != type_b:
+            _add_comparison_issue(
+                issues,
+                "ERROR",
+                "TYPE_SEQUENCE_MISMATCH",
+                (
+                    "Record type mismatch at index "
+                    f"{index}: {type_a!r} != {type_b!r}"
+                ),
+            )
+
+
+def _diff_fields(
+    record_a: Mapping[str, Any],
+    record_b: Mapping[str, Any],
+) -> list[tuple[str, Any, Any]]:
+    diffs: list[tuple[str, Any, Any]] = []
+
+    def walk(path: str, value_a: Any, value_b: Any) -> None:
+        if isinstance(value_a, Mapping) and isinstance(value_b, Mapping):
+            keys = sorted(set(value_a.keys()) | set(value_b.keys()))
+            for key in keys:
+                next_path = f"{path}.{key}" if path else str(key)
+                if key in value_a and key in value_b:
+                    walk(next_path, value_a[key], value_b[key])
+                else:
+                    diffs.append((next_path, value_a.get(key), value_b.get(key)))
+            return
+        if value_a != value_b:
+            diffs.append((path or "<root>", value_a, value_b))
+
+    walk("", record_a, record_b)
+    return diffs
+
+
+def _format_record_context(record: Mapping[str, Any]) -> str:
+    parts: list[str] = []
+    record_type = record.get("type")
+    if record_type:
+        parts.append(f"type={record_type}")
+    step_payload = record.get("step") or record.get("failed_step")
+    if isinstance(step_payload, Mapping):
+        step_index = step_payload.get("index")
+        step_id = step_payload.get("step_id")
+        if step_index is not None:
+            parts.append(f"step.index={step_index}")
+        if step_id is not None:
+            parts.append(f"step.step_id={step_id}")
+    return ", ".join(parts) if parts else "type=<unknown>"
+
+
+def _format_record_mismatch_message(
+    index: int,
+    context: str,
+    diffs: Sequence[tuple[str, Any, Any]],
+) -> str:
+    details = ", ".join(
+        f"{field}: {value_a!r} != {value_b!r}" for field, value_a, value_b in diffs
+    )
+    return f"Record mismatch at index {index} ({context}): {details}"
 
 
 def _validate_hash_chain(records: list[dict[str, Any]], issues: list[ValidationIssue]) -> None:
