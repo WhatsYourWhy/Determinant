@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from typing import Any
 
@@ -40,16 +41,16 @@ def _canonicalize(value: Any) -> str:
         return str(value)
     if isinstance(value, (float, Decimal)):
         return _format_number(value)
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         items = ",".join(_canonicalize(item) for item in value)
         return f"[{items}]"
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         return _canonicalize_object(value)
 
     raise TypeError(f"Unsupported type for canonical JSON: {type(value)!r}")
 
 
-def _canonicalize_object(value: dict[str, Any]) -> str:
+def _canonicalize_object(value: Mapping[str, Any]) -> str:
     items: list[str] = []
     for key in sorted(value.keys()):
         if not isinstance(key, str):
