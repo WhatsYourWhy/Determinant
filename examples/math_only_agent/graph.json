@@ -1,0 +1,8 @@
+{
+  "graph_id": "math_only_agent",
+  "version": "v1",
+  "steps": [
+    {"step_id": "scale_numbers", "type": "scale_numbers"},
+    {"step_id": "summarize_numbers", "type": "summarize_numbers"}
+  ]
+}
