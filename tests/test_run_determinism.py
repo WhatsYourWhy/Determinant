@@ -3,12 +3,15 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from determinant.run import RunConfig, run
 from determinant.state import State
 from determinant.step import Artifact, Step, StepEvent, StepResult
 from determinant.utils.json_canonical import canonical_json_bytes
-from determinant.validator import compare_runs
+
+
+IGNORED_KEYS = {"run_id", "seq", "ts_utc", "hash", "prev_hash", "path", "metrics"}
 
 
 @dataclass
@@ -16,6 +19,34 @@ class SimpleGraph:
     graph_id: str
     version: str
     steps: list[Step]
+
+
+def _load_ledger_records(ledger_path: Path) -> list[dict[str, Any]]:
+    records = []
+    for raw_line in ledger_path.read_text(encoding="utf-8").splitlines():
+        if not raw_line.strip():
+            continue
+        records.append(json.loads(raw_line))
+    return records
+
+
+def _project_semantic_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [_strip_ignored_fields(record) for record in records]
+
+
+def _strip_ignored_fields(value: Any, *, in_event: bool = False) -> Any:
+    if isinstance(value, dict):
+        projected: dict[str, Any] = {}
+        for key, item in value.items():
+            if key in IGNORED_KEYS:
+                continue
+            if in_event and key == "message":
+                continue
+            projected[key] = _strip_ignored_fields(item, in_event=key == "event")
+        return projected
+    if isinstance(value, list):
+        return [_strip_ignored_fields(item, in_event=in_event) for item in value]
+    return value
 
 
 def _run_graph(tmp_path: Path, graph: SimpleGraph, run_id: str, config_data: dict) -> Path:
@@ -90,8 +121,11 @@ def test_run_determinism(tmp_path: Path) -> None:
     config_two["output_dir"] = "run_two"
     run_two_dir = _run_graph(tmp_path, graph, run_id, config_two)
 
-    comparison = compare_runs(run_one_dir, run_two_dir, normalize_run_id=True)
-    assert comparison.ok, f"Ledger projection mismatch: {comparison.issues}"
+    records_one = _load_ledger_records(run_one_dir / "ledger.ndjson")
+    records_two = _load_ledger_records(run_two_dir / "ledger.ndjson")
+    projected_one = _project_semantic_records(records_one)
+    projected_two = _project_semantic_records(records_two)
+    assert projected_one == projected_two
 
     manifest_one = json.loads((run_one_dir / "manifest.json").read_text("utf-8"))
     manifest_two = json.loads((run_two_dir / "manifest.json").read_text("utf-8"))
