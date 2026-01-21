@@ -318,10 +318,11 @@ def _environment_payload() -> dict[str, Any]:
         packages = [
             {"name": dist.metadata["Name"], "version": dist.version}
             for dist in metadata.distributions()
-            if dist.metadata.get("Name")
+            if dist.metadata.get("Name") and dist.version
         ]
         packages.sort(key=lambda item: item["name"].lower())
     return {
+        "schema": "determinant.env.v0",
         "python": {
             "version": platform.python_version(),
             "implementation": platform.python_implementation(),
@@ -331,7 +332,9 @@ def _environment_payload() -> dict[str, Any]:
             "release": platform.release(),
             "machine": platform.machine(),
         },
-        "packages": packages,
+        "dependencies": {
+            "packages": packages,
+        },
     }
 
 
