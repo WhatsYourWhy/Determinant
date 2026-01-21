@@ -1,0 +1,7 @@
+{
+  "documents": [
+    {"id": "doc-1", "text": "Determinant keeps runs reproducible."},
+    {"id": "doc-2", "text": "Deterministic execution makes audits easier."},
+    {"id": "doc-3", "text": "Short note."}
+  ]
+}

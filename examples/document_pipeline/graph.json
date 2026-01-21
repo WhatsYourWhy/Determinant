@@ -1,0 +1,9 @@
+{
+  "graph_id": "document_pipeline",
+  "version": "v1",
+  "steps": [
+    {"step_id": "parse_documents", "type": "parse_documents"},
+    {"step_id": "score_documents", "type": "score_documents"},
+    {"step_id": "select_documents", "type": "select_documents"}
+  ]
+}
