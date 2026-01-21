@@ -70,8 +70,6 @@ def test_ledger_schema_and_sequence(tmp_path: Path) -> None:
         "STEP_END",
         "RUN_END",
         "RUN_FAIL",
-        "RECORD_TIME",
-        "PERF_METRIC",
     }
     required_by_type = {
         "RUN_START": {"runtime", "run", "inputs"},
@@ -81,15 +79,13 @@ def test_ledger_schema_and_sequence(tmp_path: Path) -> None:
         "STEP_END": {"step", "status", "state_out"},
         "RUN_END": {"status", "final_state", "rollup"},
         "RUN_FAIL": {"status", "step", "error"},
-        "RECORD_TIME": {"for_seq", "for_hash", "ts_utc"},
-        "PERF_METRIC": {"for_seq", "for_hash", "step", "metrics"},
     }
 
     for index, record in enumerate(records, start=1):
         assert record["schema"] == "determinant.ledger.v0"
         assert record["type"] in allowed_types
         assert record["seq"] == index
-        for field in {"schema", "type", "run_id", "seq", "prev_hash", "hash"}:
+        for field in {"schema", "type", "run_id", "seq", "prev_hash", "hash", "ts_utc"}:
             assert field in record
         expected_fields = required_by_type.get(record["type"], set())
         assert expected_fields.issubset(record.keys())

@@ -66,6 +66,7 @@ All records share a common header:
   "run_id": "<string>",
   "seq": 1,
   "prev_hash": "<sha256 or null>",
+  "ts_utc": "2026-01-17T20:12:34.123Z",
   "hash": "<sha256>"
 }
 ```
@@ -81,38 +82,11 @@ And `prev_hash` forms a chain:
 
 This makes the ledger **tamper-evident** (not tamper-proof).
 
-### Non-semantic records
+### Timing and metrics
 
-Timing and performance data are **non-semantic** and must not affect deterministic
-replays. For v0, `ts_utc` and `metrics.duration_ms` are **not** included inside
-semantic records. Instead, they are emitted as separate non-semantic records that
-reference a semantic record by `for_seq` and `for_hash`.
-
-These non-semantic records are still chained (so they are tamper-evident within a
-single run), but tooling must ignore them when comparing runs for determinism.
-
-#### RECORD_TIME
-
-```json
-{
-  "type": "RECORD_TIME",
-  "for_seq": 1,
-  "for_hash": "<sha256>",
-  "ts_utc": "2026-01-17T20:12:34.123Z"
-}
-```
-
-#### PERF_METRIC
-
-```json
-{
-  "type": "PERF_METRIC",
-  "for_seq": 7,
-  "for_hash": "<sha256>",
-  "step": {"index": 0, "step_id": "ParseDocs"},
-  "metrics": {"duration_ms": 12}
-}
-```
+`ts_utc` is recorded on every record, and performance metadata is included inline
+when available. Tooling that compares runs for determinism should ignore
+`metrics.duration_ms` when present.
 
 ---
 
@@ -234,11 +208,12 @@ Declares completion and state output.
     "path": "state/0001_<hash>.json",
     "sha256": "<...>"
   },
+  "metrics": {"duration_ms": 12}
 }
 ```
 
-**Determinism note:** `duration_ms` is nondeterministic and is recorded as a
-separate `PERF_METRIC` record instead of being included here.
+**Determinism note:** `duration_ms` is nondeterministic and should be ignored for
+replay comparisons.
 
 ### 3.6 RUN_END
 

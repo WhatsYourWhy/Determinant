@@ -118,7 +118,6 @@ def _validate_record_order(records: list[dict[str, Any]], issues: list[Validatio
         "RUN_END",
         "RUN_FAIL",
     }
-    non_semantic = {"RECORD_TIME", "PERF_METRIC"}
     state = "START"
     step_open = False
     saw_run_start = False
@@ -126,8 +125,6 @@ def _validate_record_order(records: list[dict[str, Any]], issues: list[Validatio
 
     for record in records:
         record_type = record.get("type")
-        if record_type in non_semantic:
-            continue
         if record_type not in semantic_types:
             _add_issue(
                 issues,
