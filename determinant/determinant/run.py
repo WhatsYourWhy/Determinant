@@ -344,17 +344,20 @@ def _snapshot_state(state: State, state_dir: Path, index: int) -> tuple[str, str
 
 
 def _step_version(step: Step) -> str:
-    source_path = getattr(sys.modules.get(step.__class__.__module__, None), "__file__", None)
-    if source_path:
-        try:
-            data = Path(source_path).read_bytes()
-        except OSError:
-            data = None
-    else:
-        data = None
-    if data is None:
-        return "codehash:unknown"
-    return f"codehash:{sha256_hexdigest(data)}"
+    module = sys.modules.get(step.__class__.__module__, None)
+    source_path = getattr(module, "__file__", None)
+    if source_path is None:
+        return "src:unknown"
+    path = Path(source_path)
+    if path.suffix == ".pyc":
+        candidate = path.with_suffix(".py")
+        if candidate.exists():
+            path = candidate
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return "src:unknown"
+    return f"src:{sha256_hexdigest(data)}"
 
 
 def _step_payload(index: int, step: Step, step_version: str, graph: Any) -> dict[str, Any]:
