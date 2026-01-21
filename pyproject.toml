@@ -1,0 +1,10 @@
+[project]
+name = "determinant"
+version = "0.0.0"
+description = "Deterministic runtime for auditable, replayable agent systems."
+readme = "README.md"
+requires-python = ">=3.11"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
