@@ -1,4 +1,12 @@
-"""Validation utilities for Determinant run artifacts."""
+"""Validation utilities for Determinant run artifacts.
+
+Integrity validation recomputes per-record hashes over the full record payload
+(everything except the stored ``hash`` field and internal line metadata), so
+fields like ``ts_utc`` and ``metrics`` are included in the hash chain. It also
+verifies any file hashes referenced in ledger payloads. By contrast,
+``compare_runs`` evaluates deterministic equivalence by projecting records down
+to semantic fields and ignoring non-semantic metadata.
+"""
 
 from __future__ import annotations
 
@@ -66,7 +74,11 @@ def compare_runs(
     strict: bool = True,
     normalize_run_id: bool = True,
 ) -> ComparisonResult:
-    """Compare two run directories for deterministic ledger equivalence."""
+    """Compare two run directories for deterministic ledger equivalence.
+
+    The comparison uses projection to ignore non-semantic fields (timestamps,
+    metrics, and other metadata), while preserving semantic content.
+    """
     run_path_a = Path(run_dir_a)
     run_path_b = Path(run_dir_b)
     issues: list[ComparisonIssue] = []
