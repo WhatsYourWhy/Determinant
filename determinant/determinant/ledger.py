@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO, Any, Mapping
 
@@ -14,8 +15,8 @@ from .utils.json_canonical import canonical_json_text
 class LedgerWriter:
     """Append-only NDJSON writer with hash chaining.
 
-    Semantic records are hashed and chained. Timing and performance metadata are
-    recorded as separate non-semantic records (`RECORD_TIME`, `PERF_METRIC`).
+    Records are hashed and chained. Timing and performance metadata are included
+    inline in records.
     """
 
     path: Path
@@ -52,21 +53,21 @@ class LedgerWriter:
         *,
         ts_utc: str | None = None,
         metrics_duration_ms: int | None = None,
-        metrics_step: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Write a semantic record and optional non-semantic companions."""
+        """Write a record to the ledger."""
 
-        semantic_record = self._write_semantic_record(record_type, payload)
-        if ts_utc is not None:
-            self._write_record_time(semantic_record, ts_utc)
+        record_ts = ts_utc or self._utc_now()
+        if metrics_duration_ms is not None and record_type != "STEP_END":
+            raise ValueError("metrics_duration_ms is only supported for STEP_END records")
+        updated_payload = dict(payload)
         if metrics_duration_ms is not None:
-            if metrics_step is None:
-                raise ValueError("metrics_step is required when metrics_duration_ms is set")
-            self._write_perf_metric(semantic_record, metrics_step, metrics_duration_ms)
-        return semantic_record
+            metrics_payload = dict(updated_payload.get("metrics", {}))
+            metrics_payload["duration_ms"] = metrics_duration_ms
+            updated_payload["metrics"] = metrics_payload
+        return self._write_semantic_record(record_type, updated_payload, record_ts)
 
     def _write_semantic_record(
-        self, record_type: str, payload: Mapping[str, Any]
+        self, record_type: str, payload: Mapping[str, Any], ts_utc: str
     ) -> dict[str, Any]:
         record: dict[str, Any] = {
             "schema": self.schema,
@@ -74,34 +75,13 @@ class LedgerWriter:
             "run_id": self.run_id,
             "seq": self._next_seq(),
             "prev_hash": self._prev_hash,
+            "ts_utc": ts_utc,
         }
         record.update(payload)
         record["hash"] = self._hash_record(record)
         self._write_line(record)
         self._prev_hash = record["hash"]
         return record
-
-    def _write_record_time(self, semantic_record: Mapping[str, Any], ts_utc: str) -> None:
-        payload = {
-            "for_seq": semantic_record["seq"],
-            "for_hash": semantic_record["hash"],
-            "ts_utc": ts_utc,
-        }
-        self._write_semantic_record("RECORD_TIME", payload)
-
-    def _write_perf_metric(
-        self,
-        semantic_record: Mapping[str, Any],
-        metrics_step: Mapping[str, Any],
-        duration_ms: int,
-    ) -> None:
-        payload = {
-            "for_seq": semantic_record["seq"],
-            "for_hash": semantic_record["hash"],
-            "step": dict(metrics_step),
-            "metrics": {"duration_ms": duration_ms},
-        }
-        self._write_semantic_record("PERF_METRIC", payload)
 
     def _next_seq(self) -> int:
         self._seq += 1
@@ -116,3 +96,8 @@ class LedgerWriter:
             raise RuntimeError("LedgerWriter is not open")
         line = canonical_json_text(record)
         self._handle.write(f"{line}\n")
+
+    @staticmethod
+    def _utc_now() -> str:
+        timestamp = datetime.now(timezone.utc)
+        return timestamp.isoformat(timespec="milliseconds").replace("+00:00", "Z")
