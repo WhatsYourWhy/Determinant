@@ -65,7 +65,6 @@ All records share a common header:
   "type": "<record_type>",
   "run_id": "<string>",
   "seq": 1,
-  "ts_utc": "2026-01-17T20:12:34.123Z",
   "prev_hash": "<sha256 or null>",
   "hash": "<sha256>"
 }
@@ -81,6 +80,39 @@ And `prev_hash` forms a chain:
 * else `prev_hash = prior_record.hash`
 
 This makes the ledger **tamper-evident** (not tamper-proof).
+
+### Non-semantic records
+
+Timing and performance data are **non-semantic** and must not affect deterministic
+replays. For v0, `ts_utc` and `metrics.duration_ms` are **not** included inside
+semantic records. Instead, they are emitted as separate non-semantic records that
+reference a semantic record by `for_seq` and `for_hash`.
+
+These non-semantic records are still chained (so they are tamper-evident within a
+single run), but tooling must ignore them when comparing runs for determinism.
+
+#### RECORD_TIME
+
+```json
+{
+  "type": "RECORD_TIME",
+  "for_seq": 1,
+  "for_hash": "<sha256>",
+  "ts_utc": "2026-01-17T20:12:34.123Z"
+}
+```
+
+#### PERF_METRIC
+
+```json
+{
+  "type": "PERF_METRIC",
+  "for_seq": 7,
+  "for_hash": "<sha256>",
+  "step": {"index": 0, "step_id": "ParseDocs"},
+  "metrics": {"duration_ms": 12}
+}
+```
 
 ---
 
@@ -202,21 +234,11 @@ Declares completion and state output.
     "path": "state/0001_<hash>.json",
     "sha256": "<...>"
   },
-  "metrics": {
-    "duration_ms": 12
-  }
 }
 ```
 
-**Determinism note:** `duration_ms` is nondeterministic.
-So: metrics are allowed, but must be explicitly marked **non-semantic** and excluded from determinism comparison.
-
-You have two options:
-
-* Store timing in a separate optional record type (`PERF_METRIC`) that is excluded from strict replay checks.
-* Or allow `metrics` but forbid it from participating in hashing/diff.
-
-**I recommend:** separate `PERF_METRIC` records later; for v0, include `metrics` but your diff tool must ignore it.
+**Determinism note:** `duration_ms` is nondeterministic and is recorded as a
+separate `PERF_METRIC` record instead of being included here.
 
 ### 3.6 RUN_END
 
@@ -396,4 +418,3 @@ But here’s the core type matrix:
 > * any required record is missing
 > * any state/artifact hash does not match file bytes
 > * any step emits nondeterministic semantic fields
-
