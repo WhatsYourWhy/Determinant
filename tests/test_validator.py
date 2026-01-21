@@ -7,7 +7,7 @@ from pathlib import Path
 from determinant.run import RunConfig, run
 from determinant.state import State
 from determinant.step import Step, StepResult
-from determinant.validator import validate_run
+from determinant.validator import compare_runs, validate_run
 
 
 @dataclass
@@ -22,16 +22,21 @@ class PassThroughStep(Step):
         return StepResult(state=state, events=[], artifacts=[])
 
 
-def _create_run(tmp_path: Path) -> Path:
+def _create_run(
+    tmp_path: Path,
+    *,
+    run_id: str = "validator-run",
+    output_dir_name: str = "validator",
+) -> Path:
     graph = SimpleGraph(
         graph_id="validator-demo",
         version="v1",
         steps=[PassThroughStep()],
     )
     config = RunConfig(
-        run_id="validator-run",
+        run_id=run_id,
         seed=0,
-        output_dir=str(tmp_path / "validator"),
+        output_dir=str(tmp_path / output_dir_name),
         config_data={"example": "validator"},
     )
     initial_state = State({"status": "ok"})
@@ -69,3 +74,16 @@ def test_validator_detects_missing_state_file(tmp_path: Path) -> None:
     result = validate_run(run_dir)
     codes = {issue.code for issue in result.issues}
     assert "MISSING_STATE_FILE" in codes
+
+
+def test_compare_runs_ignores_timestamps_and_run_id(tmp_path: Path) -> None:
+    run_dir_a = _create_run(
+        tmp_path, run_id="validator-run-a", output_dir_name="validator-a"
+    )
+    run_dir_b = _create_run(
+        tmp_path, run_id="validator-run-b", output_dir_name="validator-b"
+    )
+
+    result = compare_runs(run_dir_a, run_dir_b)
+    assert result.ok is True
+    assert result.issues == []

@@ -6,7 +6,7 @@ import json
 from decimal import Decimal
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping, Sequence
 
 from .utils.hashing import sha256_canonical_json_hexdigest, sha256_hexdigest
 
@@ -22,6 +22,19 @@ class ValidationIssue:
 class ValidationResult:
     ok: bool
     issues: list[ValidationIssue]
+
+
+@dataclass(frozen=True)
+class ComparisonIssue:
+    level: str
+    code: str
+    message: str
+
+
+@dataclass(frozen=True)
+class ComparisonResult:
+    ok: bool
+    issues: list[ComparisonIssue]
 
 
 def validate_run(run_dir: str | Path) -> ValidationResult:
@@ -44,6 +57,60 @@ def validate_run(run_dir: str | Path) -> ValidationResult:
     _validate_referenced_files(run_path, records, issues)
 
     return ValidationResult(ok=not issues, issues=issues)
+
+
+def compare_runs(
+    run_dir_a: str | Path,
+    run_dir_b: str | Path,
+    *,
+    normalize_run_id: bool = True,
+) -> ComparisonResult:
+    """Compare two run directories for deterministic ledger equivalence."""
+    run_path_a = Path(run_dir_a)
+    run_path_b = Path(run_dir_b)
+    issues: list[ComparisonIssue] = []
+
+    ledger_path_a = run_path_a / "ledger.ndjson"
+    ledger_path_b = run_path_b / "ledger.ndjson"
+    if not ledger_path_a.exists():
+        _add_comparison_issue(
+            issues,
+            "ERROR",
+            "LEDGER_NOT_FOUND",
+            f"Missing ledger file at {ledger_path_a}",
+        )
+    if not ledger_path_b.exists():
+        _add_comparison_issue(
+            issues,
+            "ERROR",
+            "LEDGER_NOT_FOUND",
+            f"Missing ledger file at {ledger_path_b}",
+        )
+    if issues:
+        return ComparisonResult(ok=False, issues=issues)
+
+    records_a = list(_load_ledger_records_for_compare(ledger_path_a, issues))
+    records_b = list(_load_ledger_records_for_compare(ledger_path_b, issues))
+    if issues:
+        return ComparisonResult(ok=False, issues=issues)
+
+    return deterministic_equivalence(
+        records_a, records_b, normalize_run_id=normalize_run_id
+    )
+
+
+def deterministic_equivalence(
+    records_a: Sequence[Mapping[str, Any]],
+    records_b: Sequence[Mapping[str, Any]],
+    *,
+    normalize_run_id: bool = True,
+) -> ComparisonResult:
+    """Compare projected ledger records for deterministic equivalence."""
+    issues: list[ComparisonIssue] = []
+    projected_a = _project_ledger_records(records_a, normalize_run_id=normalize_run_id)
+    projected_b = _project_ledger_records(records_b, normalize_run_id=normalize_run_id)
+    _compare_projected_records(projected_a, projected_b, issues)
+    return ComparisonResult(ok=not issues, issues=issues)
 
 
 def _load_ledger_records(
@@ -72,6 +139,88 @@ def _load_ledger_records(
             continue
         record["_line"] = line_number
         yield record
+
+
+def _load_ledger_records_for_compare(
+    ledger_path: Path, issues: list[ComparisonIssue]
+) -> Iterable[dict[str, Any]]:
+    for line_number, raw_line in enumerate(ledger_path.read_text(encoding="utf-8").splitlines(), 1):
+        if not raw_line.strip():
+            continue
+        try:
+            record = json.loads(raw_line)
+        except json.JSONDecodeError as exc:
+            _add_comparison_issue(
+                issues,
+                "ERROR",
+                "INVALID_LEDGER_JSON",
+                f"Line {line_number}: {exc.msg}",
+            )
+            continue
+        if not isinstance(record, dict):
+            _add_comparison_issue(
+                issues,
+                "ERROR",
+                "INVALID_RECORD",
+                f"Line {line_number}: ledger record is not an object",
+            )
+            continue
+        yield record
+
+
+def _project_ledger_records(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    normalize_run_id: bool,
+) -> list[dict[str, Any]]:
+    return [
+        _project_ledger_record(record, normalize_run_id=normalize_run_id)
+        for record in records
+    ]
+
+
+def _project_ledger_record(
+    record: Mapping[str, Any],
+    *,
+    normalize_run_id: bool,
+) -> dict[str, Any]:
+    projected: dict[str, Any] = {}
+    for key, value in record.items():
+        if key in {"ts_utc", "hash", "prev_hash", "_line"}:
+            continue
+        if key == "metrics" and isinstance(value, Mapping):
+            metrics = {k: v for k, v in value.items() if k != "duration_ms"}
+            if metrics:
+                projected[key] = metrics
+            continue
+        if key == "run_id" and normalize_run_id:
+            projected[key] = "__normalized_run_id__"
+            continue
+        projected[key] = value
+    return projected
+
+
+def _compare_projected_records(
+    records_a: Sequence[Mapping[str, Any]],
+    records_b: Sequence[Mapping[str, Any]],
+    issues: list[ComparisonIssue],
+) -> None:
+    if len(records_a) != len(records_b):
+        _add_comparison_issue(
+            issues,
+            "ERROR",
+            "RECORD_COUNT_MISMATCH",
+            f"Record count mismatch: {len(records_a)} != {len(records_b)}",
+        )
+
+    for index, (record_a, record_b) in enumerate(zip(records_a, records_b)):
+        if record_a != record_b:
+            _add_comparison_issue(
+                issues,
+                "ERROR",
+                "RECORD_MISMATCH",
+                f"Record mismatch at index {index}: {record_a!r} != {record_b!r}",
+            )
 
 
 def _validate_hash_chain(records: list[dict[str, Any]], issues: list[ValidationIssue]) -> None:
@@ -386,3 +535,9 @@ def _add_issue(
     issues: list[ValidationIssue], level: str, code: str, message: str
 ) -> None:
     issues.append(ValidationIssue(level=level, code=code, message=message))
+
+
+def _add_comparison_issue(
+    issues: list[ComparisonIssue], level: str, code: str, message: str
+) -> None:
+    issues.append(ComparisonIssue(level=level, code=code, message=message))
