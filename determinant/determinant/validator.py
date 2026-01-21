@@ -184,20 +184,140 @@ def _project_ledger_record(
     *,
     normalize_run_id: bool,
 ) -> dict[str, Any]:
-    projected: dict[str, Any] = {}
-    for key, value in record.items():
-        if key in {"ts_utc", "hash", "prev_hash", "_line"}:
-            continue
-        if key == "metrics" and isinstance(value, Mapping):
-            metrics = {k: v for k, v in value.items() if k != "duration_ms"}
-            if metrics:
-                projected[key] = metrics
-            continue
-        if key == "run_id" and normalize_run_id:
-            projected[key] = "__normalized_run_id__"
-            continue
-        projected[key] = value
+    record_type = record.get("type")
+    if not record_type:
+        return {}
+    projected: dict[str, Any] = {"type": record_type}
+    if record_type == "RUN_START":
+        _project_run_start(record, projected)
+    elif record_type == "STEP_START":
+        _project_step_start(record, projected)
+    elif record_type == "STEP_EVENT":
+        _project_step_event(record, projected)
+    elif record_type == "ARTIFACT_WRITTEN":
+        _project_artifact_written(record, projected)
+    elif record_type == "STEP_END":
+        _project_step_end(record, projected)
+    elif record_type == "RUN_END":
+        _project_run_end(record, projected)
+    elif record_type == "RUN_FAIL":
+        _project_run_fail(record, projected)
+    else:
+        return {}
     return projected
+
+
+def _project_run_start(record: Mapping[str, Any], projected: dict[str, Any]) -> None:
+    runtime = _select_keys(record.get("runtime"), ("name", "version"))
+    if runtime:
+        projected["runtime"] = runtime
+    run = _select_keys(record.get("run"), ("mode", "seed"))
+    if run:
+        projected["run"] = run
+    inputs = _project_inputs(record.get("inputs"))
+    if inputs:
+        projected["inputs"] = inputs
+
+
+def _project_step_start(record: Mapping[str, Any], projected: dict[str, Any]) -> None:
+    step = _select_keys(record.get("step"), ("index", "step_id", "step_version"))
+    if step:
+        projected["step"] = step
+    state_in = _project_sha256_only(record.get("state_in"))
+    if state_in:
+        projected["state_in"] = state_in
+
+
+def _project_step_event(record: Mapping[str, Any], projected: dict[str, Any]) -> None:
+    step = _select_keys(record.get("step"), ("index", "step_id"))
+    if step:
+        projected["step"] = step
+    event = _select_keys(record.get("event"), ("event_type", "code", "data"))
+    if event:
+        projected["event"] = event
+
+
+def _project_artifact_written(record: Mapping[str, Any], projected: dict[str, Any]) -> None:
+    step = _select_keys(record.get("step"), ("index", "step_id"))
+    if step:
+        projected["step"] = step
+    artifact = _select_keys(
+        record.get("artifact"),
+        ("artifact_id", "logical_name", "media_type", "sha256"),
+    )
+    if artifact:
+        projected["artifact"] = artifact
+
+
+def _project_step_end(record: Mapping[str, Any], projected: dict[str, Any]) -> None:
+    step = _select_keys(record.get("step"), ("index", "step_id"))
+    if step:
+        projected["step"] = step
+    status = record.get("status")
+    if status is not None:
+        projected["status"] = status
+    state_out = _project_sha256_only(record.get("state_out"))
+    if state_out:
+        projected["state_out"] = state_out
+
+
+def _project_run_end(record: Mapping[str, Any], projected: dict[str, Any]) -> None:
+    status = record.get("status")
+    if status is not None:
+        projected["status"] = status
+    final_state = _project_sha256_only(record.get("final_state"))
+    if final_state:
+        projected["final_state"] = final_state
+
+
+def _project_run_fail(record: Mapping[str, Any], projected: dict[str, Any]) -> None:
+    status = record.get("status")
+    if status is not None:
+        projected["status"] = status
+    failed_step = _select_keys(record.get("step"), ("index", "step_id"))
+    if failed_step:
+        projected["failed_step"] = failed_step
+    error = record.get("error")
+    if isinstance(error, Mapping):
+        projected_error: dict[str, Any] = {}
+        exc_type = error.get("type")
+        if exc_type is not None:
+            projected_error["exc_type"] = exc_type
+        code = error.get("code")
+        if code is not None:
+            projected_error["code"] = code
+        message = error.get("message")
+        if message is not None:
+            projected_error["message"] = message
+        if projected_error:
+            projected["error"] = projected_error
+
+
+def _project_inputs(inputs: Any) -> dict[str, Any]:
+    if not isinstance(inputs, Mapping):
+        return {}
+    projected_inputs: dict[str, Any] = {}
+    for key, payload in inputs.items():
+        sha_payload = _project_sha256_only(payload)
+        if sha_payload:
+            projected_inputs[key] = sha_payload
+    return projected_inputs
+
+
+def _project_sha256_only(payload: Any) -> dict[str, Any]:
+    if isinstance(payload, Mapping) and "sha256" in payload:
+        return {"sha256": payload.get("sha256")}
+    return {}
+
+
+def _select_keys(payload: Any, keys: Iterable[str]) -> dict[str, Any]:
+    if not isinstance(payload, Mapping):
+        return {}
+    selected: dict[str, Any] = {}
+    for key in keys:
+        if key in payload:
+            selected[key] = payload[key]
+    return selected
 
 
 def _compare_projected_records(
