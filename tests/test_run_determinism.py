@@ -8,6 +8,7 @@ from determinant.run import RunConfig, run
 from determinant.state import State
 from determinant.step import Artifact, Step, StepEvent, StepResult
 from determinant.utils.json_canonical import canonical_json_bytes
+from determinant.validator import compare_runs
 
 
 @dataclass
@@ -89,13 +90,25 @@ def test_run_determinism(tmp_path: Path) -> None:
     config_two["output_dir"] = "run_two"
     run_two_dir = _run_graph(tmp_path, graph, run_id, config_two)
 
-    ledger_one = (run_one_dir / "ledger.ndjson").read_bytes()
-    ledger_two = (run_two_dir / "ledger.ndjson").read_bytes()
-    assert ledger_one == ledger_two
+    comparison = compare_runs(run_one_dir, run_two_dir, normalize_run_id=True)
+    assert comparison.ok, f"Ledger projection mismatch: {comparison.issues}"
 
     manifest_one = json.loads((run_one_dir / "manifest.json").read_text("utf-8"))
     manifest_two = json.loads((run_two_dir / "manifest.json").read_text("utf-8"))
+    assert (
+        manifest_one["inputs"]["initial_state"]["sha256"]
+        == manifest_two["inputs"]["initial_state"]["sha256"]
+    )
     assert manifest_one["final_state"]["sha256"] == manifest_two["final_state"]["sha256"]
+    assert [
+        step["state_in"]["sha256"] for step in manifest_one["steps"]
+    ] == [step["state_in"]["sha256"] for step in manifest_two["steps"]]
+    assert [
+        step["state_out"]["sha256"] for step in manifest_one["steps"]
+    ] == [step["state_out"]["sha256"] for step in manifest_two["steps"]]
+    assert [
+        artifact["sha256"] for artifact in manifest_one["artifacts"]
+    ] == [artifact["sha256"] for artifact in manifest_two["artifacts"]]
 
 
 def test_config_change_diverges_at_expected_step(tmp_path: Path) -> None:
