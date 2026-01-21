@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -321,7 +322,17 @@ def _validate_state_file(
         )
         return
     if sha:
-        actual = sha256_hexdigest(full_path.read_bytes())
+        try:
+            data = json.loads(full_path.read_text("utf-8"), parse_float=Decimal)
+        except json.JSONDecodeError:
+            _add_issue(
+                issues,
+                "ERROR",
+                "STATE_JSON_INVALID",
+                f"State file at {path} is not valid JSON",
+            )
+            return
+        actual = sha256_canonical_json_hexdigest(data)
         if actual != sha:
             _add_issue(
                 issues,

@@ -29,10 +29,12 @@ def canonical_json_bytes_for_value(value: Any) -> bytes:
 def sha256_canonical_json_bytes(value: Any) -> bytes:
     """Return the SHA-256 digest of canonical JSON bytes for a value."""
 
-    return sha256_digest(canonical_json_bytes(value))
+    data = canonical_json_bytes_for_value(value)
+    return sha256_digest(data)
 
 
 def sha256_canonical_json_hexdigest(value: Any) -> str:
     """Return the SHA-256 hex digest of canonical JSON bytes for a value."""
 
-    return sha256_hexdigest(canonical_json_bytes(value))
+    data = canonical_json_bytes_for_value(value)
+    return sha256_hexdigest(data)
