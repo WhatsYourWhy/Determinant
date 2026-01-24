@@ -86,9 +86,9 @@ def _build_graph(graph_config: dict, config: dict) -> ExampleGraph:
 
 
 def _run_replay(graph: ExampleGraph, state: State, config: dict, label: str) -> Path:
-    output_dir = Path(__file__).resolve().parent / "runs" / label
+    output_dir = Path(__file__).resolve().parent / "output"
     run_config = RunConfig(
-        run_id="math-replay",
+        run_id=f"math-replay-{label}",
         seed=config["seed"],
         output_dir=str(output_dir),
         config_data=config,

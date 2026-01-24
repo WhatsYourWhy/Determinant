@@ -170,12 +170,12 @@ graph = Graph(steps=[
 
 config_data = {
     "seed": 42,
-    "output_dir": "runs/example",
+    "output_dir": "output",
 }
 run_config = RunConfig(
-    run_id=None,
+    run_id="example",
     seed=42,
-    output_dir="runs/example",
+    output_dir="output",
     config_data=config_data,
 )
 result = run(
