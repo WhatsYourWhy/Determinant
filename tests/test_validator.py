@@ -65,6 +65,20 @@ def test_validator_detects_broken_hash_chain(tmp_path: Path) -> None:
     assert "HASH_CHAIN_BROKEN" in codes
 
 
+def test_validator_detects_tampered_record_contents(tmp_path: Path) -> None:
+    run_dir = _create_run(tmp_path)
+    ledger_path = run_dir / "ledger.ndjson"
+    lines = ledger_path.read_text("utf-8").splitlines()
+    record = json.loads(lines[0])
+    record["schema"] = "tampered"
+    lines[0] = json.dumps(record)
+    ledger_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    result = validate_run(run_dir)
+    codes = {issue.code for issue in result.issues}
+    assert "HASH_CHAIN_BROKEN" in codes
+
+
 def test_validator_detects_missing_state_file(tmp_path: Path) -> None:
     run_dir = _create_run(tmp_path)
     state_dir = run_dir / "state"
