@@ -248,6 +248,16 @@ You should store:
 * a sanitized trace with file:line:function (stable-ish)
   Avoid memory addresses.
 
+### 3.8 Failure Semantics and RUN_FAIL
+
+Each run must have exactly one terminal record: either `RUN_END` or `RUN_FAIL`.
+`RUN_FAIL` is required when a step fails and must include:
+
+* `failed_step.index` and `failed_step.step_id`
+* structured error metadata: `error.exc_type`, `error.code`, `error.message`
+
+No `STEP_*` records may follow `RUN_FAIL`. Runs lacking a terminal record are invalid.
+
 ---
 
 ## 4. Manifest schema (summary file)
