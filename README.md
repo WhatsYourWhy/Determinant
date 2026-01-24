@@ -218,6 +218,23 @@ Features will be added **only if they do not weaken these constraints**.
 
 ---
 
+## Testing
+
+Install the package in editable mode so tests can import `determinant` directly:
+
+```bash
+python -m pip install -e .
+python -m pytest -q
+```
+
+If you prefer not to install in editable mode, set `PYTHONPATH` to the repo root:
+
+```bash
+PYTHONPATH=. python -m pytest -q
+```
+
+---
+
 ## Non-Negotiables
 
 * No hidden state
