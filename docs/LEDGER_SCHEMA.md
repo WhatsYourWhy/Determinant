@@ -1,5 +1,395 @@
-# Determinant Ledger Schema
+# Determinant Ledger Schema v0
 
-This document mirrors the top-level `Determinant Ledger Schema v0.md` until the docs site is populated.
+## 0. Design choices
 
-See: `../Determinant Ledger Schema v0.md`.
+### Ledger format: **JSON Lines (NDJSON)**
+
+Reason: append-only, streamable, easy to partial-validate, good for large runs.
+
+* File: `runs/<run_id>/ledger.ndjson`
+* One JSON object per line (record).
+* Record ordering is canonical and part of the hash chain.
+
+### Hash algorithm: **SHA-256**
+
+* Used for content hashes and chain hashes.
+* Keep it boring.
+
+### Canonical JSON encoding
+
+To make hashes stable:
+
+* UTF-8
+* No insignificant whitespace
+* Object keys sorted lexicographically
+* Arrays preserved order
+* Numbers: encode deterministically (avoid floats in ledger fields; if you must, store as strings with a defined format)
+
+**Rule:** anything that is hashed MUST be canonicalized.
+
+---
+
+## 1. Directory layout for a run
+
+```
+runs/
+  <run_id>/
+    ledger.ndjson
+    manifest.json
+    artifacts/
+      <artifact_id>.<ext>
+    state/
+      <step_index>_<state_hash>.json
+    meta/
+      graph.json
+      config.json
+      env.json
+```
+
+### Why both ledger + manifest?
+
+* Ledger is append-only event stream.
+* Manifest is the final summary: pointers, rollups, final hashes.
+
+Manifest is reproducible from ledger; it just speeds tooling.
+
+---
+
+## 2. Record types
+
+All records share a common header:
+
+```json
+{
+  "schema": "determinant.ledger.v0",
+  "type": "<record_type>",
+  "run_id": "<string>",
+  "seq": 1,
+  "prev_hash": "<sha256 or null>",
+  "ts_utc": "2026-01-17T20:12:34.123Z",
+  "hash": "<sha256>"
+}
+```
+
+### Required invariant
+
+`hash = sha256(canonical_json(record_without_hash))`
+
+And `prev_hash` forms a chain:
+
+* `prev_hash = null` on first record (RUN_START)
+* else `prev_hash = prior_record.hash`
+
+This makes the ledger **tamper-evident** (not tamper-proof).
+
+### Timing and metrics
+
+`ts_utc` is recorded on every record, and performance metadata is included inline
+when available. Tooling that compares runs for determinism should ignore
+`metrics.duration_ms` when present.
+
+---
+
+## 3. Core records (minimal set)
+
+### 3.1 RUN_START
+
+Declares the run identity and the “sealed inputs.”
+
+Fields:
+
+* graph hash
+* runtime version
+* config hash
+* seed
+* initial state hash
+* environment fingerprint hash (pinned python + deps)
+
+Example payload (record body fields beyond header):
+
+```json
+{
+  "type": "RUN_START",
+  "runtime": {"name": "determinant", "version": "0.1.0"},
+  "run": {
+    "mode": "execute",
+    "seed": 42,
+    "created_by": "cli",
+    "command": "determinant run graph.json state.json --seed 42"
+  },
+  "inputs": {
+    "graph": {"path": "meta/graph.json", "sha256": "<...>"},
+    "config": {"path": "meta/config.json", "sha256": "<...>"},
+    "env": {"path": "meta/env.json", "sha256": "<...>"},
+    "initial_state": {"path": "state/0000_<hash>.json", "sha256": "<...>"}
+  }
+}
+```
+
+### 3.2 STEP_START
+
+Declares which step is about to run and the exact state snapshot.
+
+```json
+{
+  "type": "STEP_START",
+  "step": {
+    "index": 0,
+    "step_id": "ParseDocs",
+    "step_version": "codehash:<sha256>", 
+    "graph_node_id": "n0"
+  },
+  "state_in": {
+    "path": "state/0000_<hash>.json",
+    "sha256": "<...>"
+  }
+}
+```
+
+**Important:** `step_version` must be stable.
+Minimum viable: sha of the step’s source file(s) as packaged. Better later: build artifact hash.
+
+### 3.3 STEP_EVENT (0..N per step)
+
+Events are structured, typed, and **must not** contain nondeterministic junk.
+
+```json
+{
+  "type": "STEP_EVENT",
+  "step": {"index": 0, "step_id": "ParseDocs"},
+  "event": {
+    "event_type": "INFO",
+    "code": "DOC_PARSED",
+    "message": "Parsed 12 documents",
+    "data": {"doc_count": 12}
+  }
+}
+```
+
+Rules:
+
+* `event.data` must be JSON-serializable and deterministic.
+* No timestamps, random IDs, memory addresses, etc.
+
+### 3.4 ARTIFACT_WRITTEN (0..N per step)
+
+Declares any artifact outputs, byte-hashed.
+
+```json
+{
+  "type": "ARTIFACT_WRITTEN",
+  "step": {"index": 0, "step_id": "ParseDocs"},
+  "artifact": {
+    "artifact_id": "a1",
+    "logical_name": "parsed_docs",
+    "media_type": "application/json",
+    "path": "artifacts/a1.json",
+    "sha256": "<...>",
+    "size_bytes": 18422
+  }
+}
+```
+
+Rules:
+
+* Artifact paths are deterministic.
+* Artifact content must be byte-identical across identical runs.
+
+### 3.5 STEP_END
+
+Declares completion and state output.
+
+```json
+{
+  "type": "STEP_END",
+  "step": {"index": 0, "step_id": "ParseDocs"},
+  "status": "OK",
+  "state_out": {
+    "path": "state/0001_<hash>.json",
+    "sha256": "<...>"
+  },
+  "metrics": {"duration_ms": 12}
+}
+```
+
+**Determinism note:** `duration_ms` is nondeterministic and should be ignored for
+replay comparisons.
+
+### 3.6 RUN_END
+
+Final status + rollups + final state hash.
+
+```json
+{
+  "type": "RUN_END",
+  "status": "OK",
+  "final_state": {"path": "state/00NN_<hash>.json", "sha256": "<...>"},
+  "rollup": {
+    "steps_ok": 2,
+    "steps_failed": 0,
+    "artifacts": 3
+  }
+}
+```
+
+### 3.7 RUN_FAIL (alternative to RUN_END)
+
+If a step errors, emit RUN_FAIL with:
+
+* error type
+* message
+* step index/id
+* deterministic stack trace? (careful)
+
+You should store:
+
+* exception class name
+* message
+* a sanitized trace with file:line:function (stable-ish)
+  Avoid memory addresses.
+
+---
+
+## 4. Manifest schema (summary file)
+
+`manifest.json` is the digest for tooling. It should include:
+
+* `run_id`
+* `ledger_sha256` (hash of entire file bytes)
+* `chain_head_hash` (last record hash)
+* `inputs` hashes (graph/config/env/initial_state)
+* `final_state` hash
+* list of artifacts (id, path, sha, logical_name)
+* per-step summary (step_id, codehash, state_in, state_out, status)
+
+Manifest must be reproducible from the ledger.
+
+---
+
+## 5. Graph + State + Config schemas (minimum requirements)
+
+### Graph (`meta/graph.json`)
+
+Must include stable IDs and ordering:
+
+* `graph_id` (string)
+* `version` (string)
+* `nodes`: list
+
+  * `node_id` (stable)
+  * `step_id` (class/name)
+  * `inputs` mapping (optional)
+* `edges`: list
+
+  * `from`, `to`
+  * `condition` (rule expression)
+
+Conditions must be **deterministic** and must reference only state.
+
+### State snapshots (`state/*.json`)
+
+* Canonical JSON
+* Sorted keys
+* Avoid floats if possible; if present, encode with explicit format
+* Prefer:
+
+  * integers
+  * strings
+  * lists
+  * dicts
+  * byte blobs via base64 (with stable encoding)
+
+### Config (`meta/config.json`)
+
+* Everything that influences execution goes here:
+
+  * feature flags
+  * thresholds
+  * allowed IO
+  * tool settings
+* Hash it and seal it in RUN_START.
+
+---
+
+## 6. Diff requirements (how this becomes a product)
+
+A Determinant “diff” between two runs must answer:
+
+1. At what step do they diverge?
+2. Which input hash differs (graph/config/env/initial state)?
+3. If inputs are identical, which step output first differs?
+
+   * state hash
+   * artifact hash
+   * event stream (semantic events only)
+
+This is why you store:
+
+* `state_in` and `state_out` hashes per step
+* `step_version` per step
+* artifact hashes per step
+
+---
+
+## 7. Threat model coverage (ledger-specific)
+
+### Threat: tampering
+
+* Hash chain detects insertion/deletion/modification unless attacker recomputes chain.
+* If attacker can recompute chain, you need signatures (future).
+
+**v0 stance:** tamper-evident only.
+
+### Threat: nondeterminism via timestamps/random IDs
+
+* Prohibited in semantic fields.
+* Any perf/clock data must be isolated and ignored by strict checks.
+
+### Threat: environment drift
+
+* Record `env.json` including:
+
+  * Python version
+  * OS
+  * CPU arch
+  * installed packages + versions (pip freeze)
+* Hash it in RUN_START.
+* Replays require env match, or explicitly enter “best-effort replay” mode.
+
+---
+
+## 8. Versioning
+
+Ledger schema versioning is strict:
+
+* `schema = "determinant.ledger.v0"`
+* If you change any field semantics or hashing rules, bump to v1.
+
+Backwards compat is not required early, but schema version must be explicit.
+
+---
+
+## 9. Minimal JSON Schema (formal-ish)
+
+We can formalize later with JSON Schema spec files; for v0, enforce with Pydantic.
+
+But here’s the core type matrix:
+
+* `RUN_START` (required, first)
+* `STEP_START` (required per step)
+* `STEP_EVENT` (optional)
+* `ARTIFACT_WRITTEN` (optional)
+* `STEP_END` (required per step unless failed)
+* `RUN_END` (required last if OK)
+* `RUN_FAIL` (required last if failed)
+
+---
+
+## 10. One hard rule (ship this early)
+
+> A run is invalid if:
+>
+> * the hash chain is broken
+> * any required record is missing
+> * any state/artifact hash does not match file bytes
+> * any step emits nondeterministic semantic fields

@@ -8,7 +8,7 @@ from typing import Any
 from determinant.run import RunConfig, run
 from determinant.state import State
 from determinant.step import Artifact, Step, StepEvent, StepResult
-from determinant.utils.json_canonical import canonical_json_bytes
+from determinant.json_canonical import canonical_json_bytes
 
 
 IGNORED_KEYS = {"run_id", "seq", "ts_utc", "hash", "prev_hash", "path", "metrics"}

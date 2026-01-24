@@ -19,9 +19,8 @@ determinant/
 │   ├── ledger.py
 │   ├── validator.py
 │   ├── errors.py
-│   └── utils/
-│       ├── hashing.py
-│       └── json_canonical.py
+│   ├── hashing.py
+│   └── json_canonical.py
 ├── examples/
 │   ├── document_pipeline/
 │   │   ├── graph.json
