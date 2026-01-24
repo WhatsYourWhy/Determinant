@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from .hashing import sha256_canonical_json
+
 
 class LedgerWriter:
     """Write NDJSON ledger records with hash chaining (placeholder)."""
@@ -30,3 +34,9 @@ class LedgerWriter:
 
     def write_run_fail(self, payload: dict) -> None:
         raise NotImplementedError("write_run_fail is not implemented yet.")
+
+
+def ledger_record_hash(record: dict[str, Any]) -> str:
+    """Return the canonical hash of a ledger record without its hash field."""
+    record_without_hash = {key: value for key, value in record.items() if key != "hash"}
+    return sha256_canonical_json(record_without_hash)
