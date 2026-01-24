@@ -52,7 +52,6 @@ def _run_graph(
         output_dir=str(tmp_path / output_dir),
         config_data={
             "seed": seed,
-            "output_dir": output_dir,
             "initial_value": initial_value,
         },
     )

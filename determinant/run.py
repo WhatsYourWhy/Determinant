@@ -5,9 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import importlib.metadata
+import inspect
 import platform
 from pathlib import Path
 import sys
+import traceback
 from typing import Any
 
 from .ledger import LedgerWriter
@@ -142,18 +144,48 @@ def run(graph: Graph, initial_state: State, config: RunConfig) -> RunResult:
     artifact_manifest: list[dict[str, Any]] = []
     current_state = initial_state
     current_state_path = initial_state_path
+    run_failed = False
+    failure_info: dict[str, Any] | None = None
 
     step_config = config.config_data
     for index, step in enumerate(graph.steps):
-        step_info = {"index": index, "step_id": step.step_id}
+        step_info = {
+            "index": index,
+            "step_id": step.step_id,
+            "step_version": _step_version(step),
+            "graph_node_id": f"n{index:04d}",
+        }
         state_in_info = {
             "path": str(current_state_path.relative_to(run_dir)),
             "sha256": current_state.sha256(),
         }
 
         ledger.write_step_start({"step": step_info, "state_in": state_in_info})
-
-        result = step.execute(current_state, step_config, config.seed)
+        try:
+            result = step.execute(current_state, step_config, config.seed)
+        except Exception as exc:  # noqa: BLE001 - run failures must be captured
+            run_failed = True
+            failure_info = _failure_payload(
+                exc, {"index": index, "step_id": step.step_id}
+            )
+            ledger.write_run_fail(
+                {
+                    "status": "FAILED",
+                    "failed_step": failure_info["failed_step"],
+                    "error": failure_info["error"],
+                }
+            )
+            steps_manifest.append(
+                {
+                    "step": step_info,
+                    "state_in": state_in_info,
+                    "events": [],
+                    "artifacts": [],
+                    "status": "FAILED",
+                    "error": failure_info["error"],
+                }
+            )
+            break
 
         events_payload = []
         for event in result.events:
@@ -211,22 +243,6 @@ def run(graph: Graph, initial_state: State, config: RunConfig) -> RunResult:
         current_state = result.state
         current_state_path = state_out_path
 
-    final_state_info = {
-        "path": str(current_state_path.relative_to(run_dir)),
-        "sha256": current_state.sha256(),
-    }
-
-    ledger.write_run_end(
-        {
-            "status": "COMPLETED",
-            "final_state": final_state_info,
-            "rollup": {
-                "steps": len(graph.steps),
-                "artifacts": len(artifact_manifest),
-            },
-        }
-    )
-
     manifest = {
         "run_id": run_id,
         "graph": {"graph_id": graph.graph_id, "version": graph.version},
@@ -242,9 +258,31 @@ def run(graph: Graph, initial_state: State, config: RunConfig) -> RunResult:
         },
         "steps": steps_manifest,
         "artifacts": artifact_manifest,
-        "final_state": final_state_info,
-        "status": "COMPLETED",
     }
+
+    if run_failed:
+        manifest["status"] = "FAILED"
+        if failure_info:
+            manifest["failed_step"] = failure_info["failed_step"]
+            manifest["error"] = failure_info["error"]
+    else:
+        final_state_info = {
+            "path": str(current_state_path.relative_to(run_dir)),
+            "sha256": current_state.sha256(),
+        }
+        ledger.write_run_end(
+            {
+                "status": "COMPLETED",
+                "final_state": final_state_info,
+                "rollup": {
+                    "steps_ok": len(graph.steps),
+                    "steps_failed": 0,
+                    "artifacts": len(artifact_manifest),
+                },
+            }
+        )
+        manifest["final_state"] = final_state_info
+        manifest["status"] = "COMPLETED"
     ledger_bytes = ledger_path.read_bytes()
     manifest["ledger_sha256"] = sha256_bytes(ledger_bytes)
     if ledger._last_hash is not None:
@@ -253,7 +291,38 @@ def run(graph: Graph, initial_state: State, config: RunConfig) -> RunResult:
 
     return RunResult(
         run_id=run_id,
-        final_state=current_state,
-        status="COMPLETED",
+        final_state=None if run_failed else current_state,
+        status="FAILED" if run_failed else "COMPLETED",
         ledger_path=str(ledger_path),
     )
+
+
+def _step_version(step: Any) -> str:
+    module = inspect.getmodule(step.__class__)
+    module_file = getattr(module, "__file__", None)
+    if not module_file:
+        return "src:unknown"
+    path = Path(module_file)
+    if not path.exists():
+        return "src:unknown"
+    return f"src:{sha256_bytes(path.read_bytes())}"
+
+
+def _failure_payload(exc: BaseException, step_info: dict[str, Any]) -> dict[str, Any]:
+    trace = []
+    for frame in traceback.extract_tb(exc.__traceback__):
+        trace.append(
+            {
+                "file": str(Path(frame.filename).as_posix()),
+                "line": frame.lineno,
+                "function": frame.name,
+            }
+        )
+    error = {
+        "exc_type": exc.__class__.__name__,
+        "code": exc.__class__.__name__,
+        "message": str(exc),
+    }
+    if trace:
+        error["trace"] = trace
+    return {"failed_step": step_info, "error": error}

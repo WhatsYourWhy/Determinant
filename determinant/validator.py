@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .hashing import sha256_bytes
+from .json_canonical import canonical_json_bytes
 from .ledger import ledger_record_hash
 
 
@@ -235,30 +236,108 @@ def _load_projected_records(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     records = []
-    ignored_keys = {
-        "run_id",
-        "seq",
-        "ts_utc",
-        "hash",
-        "prev_hash",
-        "message",
-        "perf",
-    }
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         record = json.loads(line)
-        records.append(_strip_keys(record, ignored_keys))
+        records.append(_project_record(record))
     return records
 
 
-def _strip_keys(value: Any, ignored_keys: set[str]) -> Any:
-    if isinstance(value, dict):
-        return {
-            key: _strip_keys(item, ignored_keys)
-            for key, item in value.items()
-            if key not in ignored_keys
+def _project_record(record: dict[str, Any]) -> dict[str, Any]:
+    record_type = record.get("type")
+    projection: dict[str, Any] = {"type": record_type}
+    if record_type == "RUN_START":
+        projection["runtime"] = {
+            "name": record.get("runtime", {}).get("name"),
+            "version": record.get("runtime", {}).get("version"),
         }
-    if isinstance(value, list):
-        return [_strip_keys(item, ignored_keys) for item in value]
-    return value
+        run_info = record.get("run", {})
+        projection["run"] = {"mode": run_info.get("mode"), "seed": run_info.get("seed")}
+        inputs = record.get("inputs", {})
+        projection["inputs"] = {
+            "graph": inputs.get("graph", {}).get("sha256"),
+            "config": inputs.get("config", {}).get("sha256"),
+            "env": inputs.get("env", {}).get("sha256"),
+            "initial_state": inputs.get("initial_state", {}).get("sha256"),
+        }
+        return projection
+    if record_type == "STEP_START":
+        step_info = record.get("step", {})
+        projection["step"] = {
+            "index": step_info.get("index"),
+            "step_id": step_info.get("step_id"),
+            "step_version": step_info.get("step_version"),
+            "graph_node_id": step_info.get("graph_node_id"),
+        }
+        projection["state_in"] = record.get("state_in", {}).get("sha256")
+        return projection
+    if record_type == "STEP_EVENT":
+        step_info = record.get("step", {})
+        projection["step"] = {
+            "index": step_info.get("index"),
+            "step_id": step_info.get("step_id"),
+        }
+        event = record.get("event", {})
+        projection["event"] = {
+            "event_type": event.get("event_type"),
+            "code": event.get("code"),
+            "data": _canonicalize_event_data(event.get("data")),
+        }
+        return projection
+    if record_type == "ARTIFACT_WRITTEN":
+        step_info = record.get("step", {})
+        artifact = record.get("artifact", {})
+        projection["step"] = {
+            "index": step_info.get("index"),
+            "step_id": step_info.get("step_id"),
+        }
+        projection["artifact"] = {
+            "artifact_id": artifact.get("artifact_id"),
+            "logical_name": artifact.get("logical_name"),
+            "media_type": artifact.get("media_type"),
+            "path": artifact.get("path"),
+            "sha256": artifact.get("sha256"),
+            "size_bytes": artifact.get("size_bytes"),
+        }
+        return projection
+    if record_type == "STEP_END":
+        step_info = record.get("step", {})
+        projection["step"] = {
+            "index": step_info.get("index"),
+            "step_id": step_info.get("step_id"),
+        }
+        projection["status"] = record.get("status")
+        projection["state_out"] = record.get("state_out", {}).get("sha256")
+        return projection
+    if record_type == "RUN_END":
+        rollup = record.get("rollup", {})
+        projection["status"] = record.get("status")
+        projection["final_state"] = record.get("final_state", {}).get("sha256")
+        projection["rollup"] = {
+            "steps_ok": rollup.get("steps_ok"),
+            "steps_failed": rollup.get("steps_failed"),
+            "artifacts": rollup.get("artifacts"),
+        }
+        return projection
+    if record_type == "RUN_FAIL":
+        failed_step = record.get("failed_step", {})
+        error = record.get("error", {})
+        projection["failed_step"] = {
+            "index": failed_step.get("index"),
+            "step_id": failed_step.get("step_id"),
+        }
+        projection["error"] = {
+            "exc_type": error.get("exc_type"),
+            "code": error.get("code"),
+            "message": error.get("message"),
+            "trace": error.get("trace"),
+        }
+        return projection
+    return projection
+
+
+def _canonicalize_event_data(data: Any) -> str | None:
+    if data is None:
+        return None
+    return canonical_json_bytes(data).decode("utf-8")
