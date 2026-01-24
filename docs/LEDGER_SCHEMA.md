@@ -319,6 +319,18 @@ Conditions must be **deterministic** and must reference only state.
   * tool settings
 * Hash it and seal it in RUN_START.
 
+### Environment Snapshot (`meta/env.json`)
+
+Define a versioned schema for the environment snapshot:
+
+* `schema: "determinant.env.v0"`
+* `dependencies.type` and `dependencies.packages` are required for package captures.
+  * `dependencies.type` describes the package manager (for example, `pip`).
+  * `dependencies.packages` is a list of `{name, version}` objects, **sorted by
+    `name`** with **no duplicates**.
+* The `env.json` hash is a semantic input and must be included in
+  `RUN_START.inputs.env.sha256`.
+
 ---
 
 ## 6. Diff requirements (how this becomes a product)
