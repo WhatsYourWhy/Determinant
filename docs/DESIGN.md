@@ -213,6 +213,25 @@ zero or more artifacts
 
 Steps may fail, but failure must be explicit and logged.
 
+3.2.1 Step Identity and Versioning
+
+Each Step must declare a stable logical name, step_id. This identifier is used to match
+behavior across runs and must not change when code is relocated, refactored, or imported
+from a different module path.
+
+Each Step must also expose a step_version computed from the source file that defines the
+Step subclass. The required format is:
+
+step_version = "src:<sha256(module_file_bytes)>"
+
+This ensures that any change to the defining file produces a new version.
+
+All step-specific configuration that can affect behavior must be fully serialized and
+hashed. The canonical configuration must be stored in config.json (or State if it is
+runtime-derived), and the hash must be referenced from RUN_START.inputs.config.sha256.
+
+Hidden or unserialized step parameters that influence outcomes are explicitly forbidden.
+
 3.3 Graph
 
 A Graph defines:
