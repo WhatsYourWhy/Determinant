@@ -275,6 +275,24 @@ Each run must have exactly one terminal record: either `RUN_END` or `RUN_FAIL`.
 
 No `STEP_*` records may follow `RUN_FAIL`. Runs lacking a terminal record are invalid.
 
+### 3.9 Deterministic comparison fields
+
+For determinism checks, compare a semantic projection of each record and ignore
+non-deterministic headers (`ts_utc`, `hash`, `prev_hash`) and any performance or
+freeform message fields. Structured event payloads must be compared using
+canonical JSON (sorted keys, stable number encoding) and the comparison should
+apply to the `event.data` object itself (not its stringified form).
+
+| Record type | Keep (semantic fields) | Ignore for deterministic comparison |
+| --- | --- | --- |
+| `RUN_START` | `runtime.name`, `runtime.version`, `run.mode`, `run.seed`, `inputs.graph.sha256`, `inputs.config.sha256`, `inputs.env.sha256`, `inputs.initial_state.sha256` | `run.created_by`, `run.command`, header fields (`ts_utc`, `hash`, `prev_hash`), any perf metadata |
+| `STEP_START` | `step.index`, `step.step_id`, `step.step_version`, `step.graph_node_id`, `state_in.sha256` | header fields (`ts_utc`, `hash`, `prev_hash`), any perf metadata |
+| `STEP_EVENT` | `step.index`, `step.step_id`, `event.event_type`, `event.code`, `event.data` (compare canonical JSON) | `event.message` (freeform), header fields (`ts_utc`, `hash`, `prev_hash`), any perf metadata |
+| `ARTIFACT_WRITTEN` | `step.index`, `step.step_id`, `artifact.artifact_id`, `artifact.logical_name`, `artifact.media_type`, `artifact.path`, `artifact.sha256`, `artifact.size_bytes` | header fields (`ts_utc`, `hash`, `prev_hash`), any perf metadata |
+| `STEP_END` | `step.index`, `step.step_id`, `status`, `state_out.sha256` | `metrics.duration_ms` (perf), header fields (`ts_utc`, `hash`, `prev_hash`) |
+| `RUN_END` | `status`, `final_state.sha256`, `rollup.steps_ok`, `rollup.steps_failed`, `rollup.artifacts` | header fields (`ts_utc`, `hash`, `prev_hash`), any perf metadata |
+| `RUN_FAIL` | `failed_step.index`, `failed_step.step_id`, `error.exc_type`, `error.code`, `error.message` (sanitized), `error.trace` (normalized frames if present) | header fields (`ts_utc`, `hash`, `prev_hash`), any perf metadata |
+
 ---
 
 ## 4. Manifest schema (summary file)
