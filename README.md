@@ -153,14 +153,14 @@ If you break these guarantees, you are using Determinant incorrectly.
 ## Example (Minimal)
 
 ```python
-from determinant import State, Step, Graph, run
+from determinant import State, Step, Graph, RunConfig, run
 
 class ParseDocs(Step):
-    def execute(self, state: State):
+    def execute(self, state: State, config: dict[str, object], seed: int):
         ...
 
 class ScoreDocs(Step):
-    def execute(self, state: State):
+    def execute(self, state: State, config: dict[str, object], seed: int):
         ...
 
 graph = Graph(steps=[
@@ -168,10 +168,20 @@ graph = Graph(steps=[
     ScoreDocs(),
 ])
 
+config_data = {
+    "seed": 42,
+    "output_dir": "runs/example",
+}
+run_config = RunConfig(
+    run_id=None,
+    seed=42,
+    output_dir="runs/example",
+    config_data=config_data,
+)
 result = run(
     graph=graph,
     initial_state=State.from_file("input.json"),
-    seed=42
+    config=run_config,
 )
 ```
 

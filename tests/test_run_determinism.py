@@ -67,7 +67,8 @@ class AddValueStep(Step):
         super().__init__()
         self.increment = increment
 
-    def execute(self, state: State) -> StepResult:
+    def execute(self, state: State, config: dict[str, Any], seed: int) -> StepResult:
+        _ = config, seed
         value = int(state.data["value"]) + self.increment
         new_state = State({"value": value})
         event = StepEvent(
@@ -91,7 +92,8 @@ class ThresholdStep(Step):
         super().__init__()
         self.threshold = threshold
 
-    def execute(self, state: State) -> StepResult:
+    def execute(self, state: State, config: dict[str, Any], seed: int) -> StepResult:
+        _ = config, seed
         value = int(state.data["value"])
         new_state = State(
             {
