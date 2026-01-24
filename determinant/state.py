@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from .hashing import sha256_canonical_json
+from .json_canonical import canonical_json_bytes
 
 @dataclass(frozen=True)
 class State:
@@ -22,9 +24,9 @@ class State:
         raise NotImplementedError("State.to_file is not implemented yet.")
 
     def to_canonical_json_bytes(self) -> bytes:
-        """Return canonical JSON bytes for hashing (placeholder)."""
-        raise NotImplementedError("State.to_canonical_json_bytes is not implemented yet.")
+        """Return canonical JSON bytes for hashing."""
+        return canonical_json_bytes(self.data)
 
     def sha256(self) -> str:
-        """Return SHA-256 of the canonical JSON bytes (placeholder)."""
-        raise NotImplementedError("State.sha256 is not implemented yet.")
+        """Return SHA-256 of the canonical JSON bytes."""
+        return sha256_canonical_json(self.data)
