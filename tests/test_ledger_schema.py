@@ -79,7 +79,7 @@ def test_ledger_schema_and_sequence(tmp_path: Path) -> None:
         "ARTIFACT_WRITTEN": {"step", "artifact"},
         "STEP_END": {"step", "status", "state_out"},
         "RUN_END": {"status", "final_state", "rollup"},
-        "RUN_FAIL": {"status", "step", "error"},
+        "RUN_FAIL": {"status", "failed_step", "error"},
     }
 
     for index, record in enumerate(records, start=1):
