@@ -141,6 +141,47 @@ Seed and configuration
 
 If an execution cannot be reconstructed from the ledger, the ledger is insufficient.
 
+2.6 Deterministic Semantics vs Incidental Metadata
+
+The ledger contains both semantic data (which defines the execution) and incidental metadata
+(which may vary without changing meaning). Semantic equality between two runs is defined by
+matching:
+
+Graph, configuration, and environment hashes
+
+Step identity and version
+
+State hashes (including the final_state hash)
+
+Artifact hashes or stable artifact IDs
+
+Event codes and event data
+
+Run status
+
+The following fields are always ignored for semantic comparisons:
+
+run_id
+
+seq
+
+ts_utc
+
+hash
+
+prev_hash
+
+The following fields are conditionally ignored for semantic comparisons when they do not
+affect program meaning:
+
+message
+
+Performance metrics such as duration_ms and size_bytes
+
+Regardless of semantic comparisons, the hash chain must still cover full ledger records
+(excluding the hash field itself) to provide integrity and tamper evidence for incidental
+metadata as well.
+
 3. Execution Model
 3.1 State
 
