@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import importlib.metadata
+import platform
 from pathlib import Path
+import sys
 from typing import Any
 
 from .ledger import LedgerWriter
@@ -41,30 +44,98 @@ def run(graph: Graph, initial_state: State, config: RunConfig) -> RunResult:
     run_dir = Path(config.output_dir)
     state_dir = run_dir / "state"
     artifacts_dir = run_dir / "artifacts"
+    meta_dir = run_dir / "meta"
     state_dir.mkdir(parents=True, exist_ok=True)
     artifacts_dir.mkdir(parents=True, exist_ok=True)
+    meta_dir.mkdir(parents=True, exist_ok=True)
 
     ledger_path = run_dir / "ledger.ndjson"
     manifest_path = run_dir / "manifest.json"
     ledger = LedgerWriter(str(ledger_path), run_id)
 
-    initial_state_path = state_dir / "initial.json"
-    initial_state.to_file(str(initial_state_path))
-
     config_payload = {
         key: value for key, value in config.config_data.items() if key != "output_dir"
     }
 
+    graph_payload = {
+        "graph_id": graph.graph_id,
+        "version": graph.version,
+        "nodes": [
+            {
+                "node_id": f"n{index:04d}",
+                "step_id": step.step_id,
+            }
+            for index, step in enumerate(graph.steps)
+        ],
+        "edges": [
+            {"from": f"n{index:04d}", "to": f"n{index + 1:04d}"}
+            for index in range(len(graph.steps) - 1)
+        ],
+    }
+    graph_bytes = canonical_json_bytes(graph_payload)
+    graph_path = meta_dir / "graph.json"
+    graph_path.write_bytes(graph_bytes)
+    graph_info = {
+        "path": str(graph_path.relative_to(run_dir)),
+        "sha256": sha256_bytes(graph_bytes),
+    }
+
+    config_bytes = canonical_json_bytes(config_payload)
+    config_path = meta_dir / "config.json"
+    config_path.write_bytes(config_bytes)
+    config_info = {
+        "path": str(config_path.relative_to(run_dir)),
+        "sha256": sha256_bytes(config_bytes),
+    }
+
+    packages: list[dict[str, str]] = []
+    for dist in importlib.metadata.distributions():
+        name = dist.metadata.get("Name") or dist.metadata.get("name") or dist.name
+        if not name:
+            continue
+        packages.append({"name": name, "version": dist.version})
+    packages.sort(key=lambda item: item["name"].casefold())
+    env_payload = {
+        "python": {
+            "version": sys.version,
+            "implementation": platform.python_implementation(),
+        },
+        "platform": {
+            "system": platform.system(),
+            "release": platform.release(),
+            "machine": platform.machine(),
+        },
+        "packages": packages,
+    }
+    env_bytes = canonical_json_bytes(env_payload)
+    env_path = meta_dir / "env.json"
+    env_path.write_bytes(env_bytes)
+    env_info = {
+        "path": str(env_path.relative_to(run_dir)),
+        "sha256": sha256_bytes(env_bytes),
+    }
+
+    initial_state_hash = initial_state.sha256()
+    initial_state_path = state_dir / f"0000_{initial_state_hash}.json"
+    initial_state.to_file(str(initial_state_path))
+
+    try:
+        runtime_version = importlib.metadata.version("determinant")
+    except importlib.metadata.PackageNotFoundError:
+        runtime_version = "unknown"
+
     ledger.write_run_start(
         {
-            "runtime": {"seed": config.seed},
-            "run": {"graph_id": graph.graph_id, "graph_version": graph.version},
+            "runtime": {"name": "determinant", "version": runtime_version},
+            "run": {"mode": "execute", "seed": config.seed},
             "inputs": {
+                "graph": graph_info,
+                "config": config_info,
+                "env": env_info,
                 "initial_state": {
                     "path": str(initial_state_path.relative_to(run_dir)),
-                    "sha256": initial_state.sha256(),
+                    "sha256": initial_state_hash,
                 },
-                "config": config_payload,
             },
         }
     )
@@ -74,7 +145,7 @@ def run(graph: Graph, initial_state: State, config: RunConfig) -> RunResult:
     current_state = initial_state
     current_state_path = initial_state_path
 
-    for index, step in enumerate(graph.steps, start=1):
+    for index, step in enumerate(graph.steps):
         step_info = {"index": index, "step_id": step.step_id}
         state_in_info = {
             "path": str(current_state_path.relative_to(run_dir)),
@@ -98,7 +169,9 @@ def run(graph: Graph, initial_state: State, config: RunConfig) -> RunResult:
 
         artifacts_payload = []
         for artifact in result.artifacts:
-            artifact_path = artifacts_dir / f"step_{index}" / artifact.path
+            suffix = Path(artifact.path).suffix
+            artifact_name = f"{artifact.artifact_id}{suffix}"
+            artifact_path = artifacts_dir / artifact_name
             artifact_path.parent.mkdir(parents=True, exist_ok=True)
             artifact_path.write_bytes(artifact.bytes)
             artifact_info = {
@@ -107,16 +180,18 @@ def run(graph: Graph, initial_state: State, config: RunConfig) -> RunResult:
                 "media_type": artifact.media_type,
                 "path": str(artifact_path.relative_to(run_dir)),
                 "sha256": sha256_bytes(artifact.bytes),
+                "size_bytes": len(artifact.bytes),
             }
             artifacts_payload.append(artifact_info)
             artifact_manifest.append(artifact_info)
             ledger.write_artifact_written({"step": step_info, "artifact": artifact_info})
 
-        state_out_path = state_dir / f"step_{index}_out.json"
+        state_out_hash = result.state.sha256()
+        state_out_path = state_dir / f"{index + 1:04d}_{state_out_hash}.json"
         result.state.to_file(str(state_out_path))
         state_out_info = {
             "path": str(state_out_path.relative_to(run_dir)),
-            "sha256": result.state.sha256(),
+            "sha256": state_out_hash,
         }
 
         ledger.write_step_end(
@@ -157,11 +232,13 @@ def run(graph: Graph, initial_state: State, config: RunConfig) -> RunResult:
         "run_id": run_id,
         "graph": {"graph_id": graph.graph_id, "version": graph.version},
         "inputs": {
+            "graph": graph_info,
+            "config": config_info,
+            "env": env_info,
             "initial_state": {
                 "path": str(initial_state_path.relative_to(run_dir)),
-                "sha256": initial_state.sha256(),
+                "sha256": initial_state_hash,
             },
-            "config": config_payload,
             "seed": config.seed,
         },
         "steps": steps_manifest,
@@ -169,6 +246,10 @@ def run(graph: Graph, initial_state: State, config: RunConfig) -> RunResult:
         "final_state": final_state_info,
         "status": "COMPLETED",
     }
+    ledger_bytes = ledger_path.read_bytes()
+    manifest["ledger_sha256"] = sha256_bytes(ledger_bytes)
+    if ledger._last_hash is not None:
+        manifest["chain_head_hash"] = ledger._last_hash
     manifest_path.write_bytes(canonical_json_bytes(manifest))
 
     return RunResult(
