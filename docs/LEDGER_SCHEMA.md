@@ -403,3 +403,26 @@ But here’s the core type matrix:
 > * any required record is missing
 > * any state/artifact hash does not match file bytes
 > * any step emits nondeterministic semantic fields
+
+---
+
+## 11. Validator Responsibilities
+
+### Integrity checks
+
+Validators must ensure:
+
+* Hash chain verification across all records.
+* File hashes match referenced ledger entries.
+* All referenced files are present.
+* Record order is structurally valid:
+  * `RUN_START` is first.
+  * `RUN_END` or `RUN_FAIL` is last.
+  * `STEP_START`/`STEP_END` pairs are balanced unless a failure terminates the run.
+
+### Comparison checks
+
+When comparing runs, validators must:
+
+* Apply semantic projection rules before comparing.
+* Report the earliest divergence, including record index and step index/id when applicable.
