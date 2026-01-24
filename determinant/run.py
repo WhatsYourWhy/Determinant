@@ -43,7 +43,8 @@ class RunResult:
 def run(graph: Graph, initial_state: State, config: RunConfig) -> RunResult:
     """Execute a graph with the provided state."""
     run_id = config.run_id or f"run-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-    run_dir = Path(config.output_dir)
+    output_root = Path(config.output_dir)
+    run_dir = output_root / "runs" / run_id
     state_dir = run_dir / "state"
     artifacts_dir = run_dir / "artifacts"
     meta_dir = run_dir / "meta"
@@ -88,14 +89,19 @@ def run(graph: Graph, initial_state: State, config: RunConfig) -> RunResult:
         "sha256": sha256_bytes(config_bytes),
     }
 
-    packages: list[dict[str, str]] = []
+    packages_by_name: dict[str, dict[str, str]] = {}
     for dist in importlib.metadata.distributions():
         name = dist.metadata.get("Name") or dist.metadata.get("name") or dist.name
         if not name:
             continue
-        packages.append({"name": name, "version": dist.version})
-    packages.sort(key=lambda item: item["name"].casefold())
+        normalized = name.strip()
+        key = normalized.casefold()
+        if key in packages_by_name:
+            continue
+        packages_by_name[key] = {"name": normalized, "version": dist.version}
+    packages = sorted(packages_by_name.values(), key=lambda item: item["name"].casefold())
     env_payload = {
+        "schema": "determinant.env.v0",
         "python": {
             "version": sys.version,
             "implementation": platform.python_implementation(),
@@ -105,7 +111,7 @@ def run(graph: Graph, initial_state: State, config: RunConfig) -> RunResult:
             "release": platform.release(),
             "machine": platform.machine(),
         },
-        "packages": packages,
+        "dependencies": {"type": "pip", "packages": packages},
     }
     env_bytes = canonical_json_bytes(env_payload)
     env_path = meta_dir / "env.json"
