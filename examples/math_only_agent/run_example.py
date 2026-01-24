@@ -26,7 +26,8 @@ class ScaleNumbers(Step):
         super().__init__()
         self.multiplier = multiplier
 
-    def execute(self, state: State) -> StepResult:
+    def execute(self, state: State, config: dict[str, object], seed: int) -> StepResult:
+        _ = config, seed
         numbers = [int(value) * self.multiplier for value in state.data["numbers"]]
         new_state = State({"numbers": state.data["numbers"], "scaled": numbers})
         event = StepEvent(
@@ -39,7 +40,8 @@ class ScaleNumbers(Step):
 
 
 class SummarizeNumbers(Step):
-    def execute(self, state: State) -> StepResult:
+    def execute(self, state: State, config: dict[str, object], seed: int) -> StepResult:
+        _ = config, seed
         scaled = state.data["scaled"]
         total = sum(int(value) for value in scaled)
         average = total / max(len(scaled), 1)

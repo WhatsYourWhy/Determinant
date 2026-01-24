@@ -21,7 +21,8 @@ class AddValueStep(Step):
         super().__init__()
         self.increment = increment
 
-    def execute(self, state: State) -> StepResult:
+    def execute(self, state: State, config: dict[str, object], seed: int) -> StepResult:
+        _ = config, seed
         value = int(state.data["value"]) + self.increment
         return StepResult(state=State({"value": value}))
 
@@ -31,7 +32,8 @@ class MultiplyValueStep(Step):
         super().__init__()
         self.multiplier = multiplier
 
-    def execute(self, state: State) -> StepResult:
+    def execute(self, state: State, config: dict[str, object], seed: int) -> StepResult:
+        _ = config, seed
         value = int(state.data["value"]) * self.multiplier
         return StepResult(state=State({"value": value}))
 

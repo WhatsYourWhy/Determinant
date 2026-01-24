@@ -219,7 +219,7 @@ class Step(ABC):
     step_id: str  # default to class name
 
     @abstractmethod
-    def execute(self, state: State) -> StepResult:
+    def execute(self, state: State, config: dict[str, Any], seed: int) -> StepResult:
         ...
 ```
 
@@ -286,6 +286,7 @@ class RunConfig:
     run_id: str | None
     seed: int
     output_dir: str
+    config_data: dict[str, Any]
 
 @dataclass
 class RunResult:

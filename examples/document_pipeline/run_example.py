@@ -22,7 +22,8 @@ class ExampleGraph:
 
 
 class ParseDocuments(Step):
-    def execute(self, state: State) -> StepResult:
+    def execute(self, state: State, config: dict[str, object], seed: int) -> StepResult:
+        _ = config, seed
         documents = state.data["documents"]
         parsed = [
             {"id": doc["id"], "text": doc["text"], "word_count": len(doc["text"].split())}
@@ -43,7 +44,8 @@ class ScoreDocuments(Step):
         super().__init__()
         self.weight = weight
 
-    def execute(self, state: State) -> StepResult:
+    def execute(self, state: State, config: dict[str, object], seed: int) -> StepResult:
+        _ = config, seed
         parsed = state.data["parsed"]
         scored = [
             {
@@ -67,7 +69,8 @@ class SelectDocuments(Step):
         super().__init__()
         self.threshold = threshold
 
-    def execute(self, state: State) -> StepResult:
+    def execute(self, state: State, config: dict[str, object], seed: int) -> StepResult:
+        _ = config, seed
         scored = state.data["scored"]
         selected = [doc for doc in scored if int(doc["score"]) >= self.threshold]
         new_state = State({

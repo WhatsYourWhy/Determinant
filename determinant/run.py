@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import importlib.metadata
 import platform
@@ -25,7 +25,7 @@ class RunConfig:
     run_id: str | None
     seed: int
     output_dir: str
-    config_data: dict[str, Any]
+    config_data: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -53,9 +53,7 @@ def run(graph: Graph, initial_state: State, config: RunConfig) -> RunResult:
     manifest_path = run_dir / "manifest.json"
     ledger = LedgerWriter(str(ledger_path), run_id)
 
-    config_payload = {
-        key: value for key, value in config.config_data.items() if key != "output_dir"
-    }
+    config_payload = dict(config.config_data)
 
     graph_payload = {
         "graph_id": graph.graph_id,
@@ -145,6 +143,7 @@ def run(graph: Graph, initial_state: State, config: RunConfig) -> RunResult:
     current_state = initial_state
     current_state_path = initial_state_path
 
+    step_config = config.config_data
     for index, step in enumerate(graph.steps):
         step_info = {"index": index, "step_id": step.step_id}
         state_in_info = {
@@ -154,7 +153,7 @@ def run(graph: Graph, initial_state: State, config: RunConfig) -> RunResult:
 
         ledger.write_step_start({"step": step_info, "state_in": state_in_info})
 
-        result = step.execute(current_state)
+        result = step.execute(current_state, step_config, config.seed)
 
         events_payload = []
         for event in result.events:

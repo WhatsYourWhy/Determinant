@@ -49,6 +49,6 @@ class Step(ABC):
             self.step_id = self.__class__.__name__
 
     @abstractmethod
-    def execute(self, state: State) -> StepResult:
+    def execute(self, state: State, config: dict[str, Any], seed: int) -> StepResult:
         """Execute the step over the provided state."""
         raise NotImplementedError

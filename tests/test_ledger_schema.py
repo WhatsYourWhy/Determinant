@@ -18,7 +18,8 @@ class SimpleGraph:
 
 
 class EventArtifactStep(Step):
-    def execute(self, state: State) -> StepResult:
+    def execute(self, state: State, config: dict[str, object], seed: int) -> StepResult:
+        _ = config, seed
         count = int(state.data["count"]) + 1
         new_state = State({"count": count})
         event = StepEvent(
