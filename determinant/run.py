@@ -57,6 +57,7 @@ def run(graph: Graph, initial_state: State, config: RunConfig) -> RunResult:
     ledger = LedgerWriter(str(ledger_path), run_id)
 
     config_payload = dict(config.config_data)
+    config_payload.pop("output_dir", None)
 
     graph_payload = {
         "graph_id": graph.graph_id,
