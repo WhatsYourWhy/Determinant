@@ -123,7 +123,7 @@ def run(graph: Graph, initial_state: State, config: RunConfig) -> RunResult:
     }
 
     initial_state_hash = initial_state.sha256()
-    initial_state_path = state_dir / f"0000_{initial_state_hash}.json"
+    initial_state_path = state_dir / "0000.json"
     initial_state.to_file(str(initial_state_path))
 
     try:
@@ -225,7 +225,7 @@ def run(graph: Graph, initial_state: State, config: RunConfig) -> RunResult:
             ledger.write_artifact_written({"step": step_info, "artifact": artifact_info})
 
         state_out_hash = result.state.sha256()
-        state_out_path = state_dir / f"{index + 1:04d}_{state_out_hash}.json"
+        state_out_path = state_dir / f"{index + 1:04d}.json"
         result.state.to_file(str(state_out_path))
         state_out_info = {
             "path": str(state_out_path.relative_to(run_dir)),
