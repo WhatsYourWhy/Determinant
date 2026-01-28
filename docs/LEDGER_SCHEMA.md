@@ -210,6 +210,7 @@ Declares any artifact outputs, byte-hashed.
 Rules:
 
 * Artifact paths are deterministic.
+* `artifact.logical_name` defines semantic identity; `artifact.path` must be a deterministic, pure function of artifact identity (and may only change if that function changes).
 * Artifact content must be byte-identical across identical runs.
 
 ### 3.5 STEP_END
@@ -264,6 +265,9 @@ You should store:
 * message
 * a sanitized trace with file:line:function (stable-ish)
   Avoid memory addresses.
+
+Stack traces, if present, must be normalized to remove memory addresses and absolute paths.
+If stable normalization is not possible, traces must be omitted from semantic comparison.
 
 ### 3.8 Failure Semantics and RUN_FAIL
 

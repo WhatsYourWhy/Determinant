@@ -145,6 +145,9 @@ Seed and configuration
 
 If an execution cannot be reconstructed from the ledger, the ledger is insufficient.
 
+The ledger is the source of truth; the manifest is a derived summary and must never contain
+information not reconstructible from the ledger.
+
 2.6 Deterministic Semantics vs Incidental Metadata
 
 The ledger contains both semantic data (which defines the execution) and incidental metadata
