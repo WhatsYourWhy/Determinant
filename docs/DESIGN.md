@@ -52,6 +52,10 @@ If this is not true, the runtime is broken.
 
 All mutable information must be represented in the State object.
 
+Configuration and environment inputs are considered sealed execution inputs and must be
+fully serialized, hashed, and referenced from the ledger. They may influence execution,
+but they must not change during a run.
+
 Forbidden:
 
 Hidden globals
