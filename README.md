@@ -125,7 +125,7 @@ An explicit execution graph:
 A single execution of a graph:
 
 * Produces a complete execution ledger
-* Can be replayed byte-for-byte
+* Can be replayed semantically (state/artifact hashes and step records)
 * Can be diffed against other runs
 
 ---
@@ -135,16 +135,16 @@ A single execution of a graph:
 Determinant makes the following guarantees:
 
 * **Replayability**
-  Same inputs → same outputs
+  Same graph/state/config/seed produces the same state and artifact hashes.
 
 * **Auditability**
-  Every step, transition, and artifact is logged
+  Every step transition, event, and artifact write is logged in `ledger.ndjson`.
 
 * **Explainability**
-  Divergence between runs is attributable to explicit differences
+  Divergence between runs can be located by comparing manifest and ledger hashes.
 
 * **Local-first**
-  Runs fully offline by default
+  The runtime executes local Python code only; any network behavior must come from user steps.
 
 If you break these guarantees, you are using Determinant incorrectly.
 
@@ -153,20 +153,24 @@ If you break these guarantees, you are using Determinant incorrectly.
 ## Example (Minimal)
 
 ```python
-from determinant import State, Step, Graph, RunConfig, run
+from determinant import State, Step, StepEvent, StepResult, Graph, RunConfig, run
 
-class ParseDocs(Step):
-    def execute(self, state: State, config: dict[str, object], seed: int):
-        ...
+class AddValue(Step):
+    def execute(self, state: State, config: dict[str, object], seed: int) -> StepResult:
+        _ = seed
+        inc = int(config.get("increment", 1))
+        value = int(state.data.get("value", 0)) + inc
+        return StepResult(
+            state=State({"value": value}),
+            events=[StepEvent(event_type="INFO", code="VALUE_UPDATED", message="value updated")],
+        )
 
-class ScoreDocs(Step):
-    def execute(self, state: State, config: dict[str, object], seed: int):
-        ...
 
-graph = Graph(steps=[
-    ParseDocs(),
-    ScoreDocs(),
-])
+graph = Graph(
+    graph_id="minimal",
+    version="v1",
+    steps=[AddValue()],
+)
 
 config_data = {
     "seed": 42,
@@ -180,12 +184,16 @@ run_config = RunConfig(
 )
 result = run(
     graph=graph,
-    initial_state=State.from_file("input.json"),
+    initial_state=State({"value": 0}),
     config=run_config,
 )
+
+print(result.status)      # COMPLETED
+print(result.ledger_path) # output/runs/example/ledger.ndjson
 ```
 
-Running this twice with the same inputs will produce **identical results and ledgers**.
+Running this twice with the same inputs will produce the same final state and artifact hashes.
+Ledger files include timestamps, so compare semantic fields rather than full file bytes.
 
 ---
 
