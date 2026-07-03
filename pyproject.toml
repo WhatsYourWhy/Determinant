@@ -1,6 +1,6 @@
 [project]
 name = "determinant"
-version = "0.0.0"
+version = "0.1.0"
 description = "Deterministic runtime for auditable, replayable agent systems."
 readme = "README.md"
 requires-python = ">=3.11"
